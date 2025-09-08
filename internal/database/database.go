@@ -2,8 +2,8 @@ package database
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
+	"goAuth/internal/database/model"
 	"log"
 	"os"
 	"strconv"
@@ -11,6 +11,9 @@ import (
 
 	_ "github.com/joho/godotenv/autoload"
 	_ "github.com/mattn/go-sqlite3"
+	"go.uber.org/zap"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 // Service represents a service that interacts with a database.
@@ -21,11 +24,19 @@ type Service interface {
 
 	// Close terminates the database connection.
 	// It returns an error if the connection cannot be closed.
+	// SQLITE3 does not have such a thing as close but its usable in other db types
 	Close() error
+
+	// AutoMigrate runs GORM automigrations for the provided models.
+	// It returns an error if the migration fails.
+	AutoMigrate(models ...any) error
+
+	GetDBInstance() *gorm.DB
 }
 
 type service struct {
-	db *sql.DB
+	db     *gorm.DB
+	logger *zap.Logger
 }
 
 var (
@@ -39,7 +50,7 @@ func New() Service {
 		return dbInstance
 	}
 
-	db, err := sql.Open("sqlite3", dburl)
+	db, err := gorm.Open(sqlite.Open(dburl), &gorm.Config{})
 	if err != nil {
 		// This will not be a connection error, but a DSN parse error or
 		// another initialization error.
@@ -47,8 +58,10 @@ func New() Service {
 	}
 
 	dbInstance = &service{
-		db: db,
+		db:     db,
+		logger: zap.L(),
 	}
+	dbInstance.AutoMigrate(&model.User{})
 	return dbInstance
 }
 
@@ -60,9 +73,17 @@ func (s *service) Health() map[string]string {
 
 	stats := make(map[string]string)
 
-	// Ping the database
-	err := s.db.PingContext(ctx)
+	// Get the underlying *sql.DB from the GORM DB
+	sqlDB, err := s.db.DB()
 	if err != nil {
+		stats["status"] = "down"
+		stats["error"] = fmt.Sprintf("failed to get sql.DB: %v", err)
+		log.Fatalf("failed to get sql.DB: %v", err)
+		return stats
+	}
+
+	// Ping the database
+	if err := sqlDB.PingContext(ctx); err != nil {
 		stats["status"] = "down"
 		stats["error"] = fmt.Sprintf("db down: %v", err)
 		log.Fatalf("db down: %v", err) // Log the error and terminate the program
@@ -74,7 +95,7 @@ func (s *service) Health() map[string]string {
 	stats["message"] = "It's healthy"
 
 	// Get database stats (like open connections, in use, idle, etc.)
-	dbStats := s.db.Stats()
+	dbStats := sqlDB.Stats()
 	stats["open_connections"] = strconv.Itoa(dbStats.OpenConnections)
 	stats["in_use"] = strconv.Itoa(dbStats.InUse)
 	stats["idle"] = strconv.Itoa(dbStats.Idle)
@@ -103,11 +124,30 @@ func (s *service) Health() map[string]string {
 	return stats
 }
 
-// Close closes the database connection.
-// It logs a message indicating the disconnection from the specific database.
-// If the connection is successfully closed, it returns nil.
-// If an error occurs while closing the connection, it returns the error.
+// Close closes the underlying sql.DB connection if available.
 func (s *service) Close() error {
-	log.Printf("Disconnected from database: %s", dburl)
-	return s.db.Close()
+	if s.db == nil {
+		return nil
+	}
+	sqlDB, err := s.db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
+}
+
+func (s *service) AutoMigrate(models ...any) error {
+	go func() {
+		if r := recover(); r != nil {
+			s.logger.Error("error applying migrations", zap.Any("recover", r))
+		}
+		for _, model := range models {
+			s.db.AutoMigrate(model)
+		}
+	}()
+	return nil
+}
+
+func (s *service) GetDBInstance() *gorm.DB {
+	return s.db
 }
