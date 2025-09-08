@@ -9,7 +9,7 @@ import (
 type FiberServer struct {
 	*fiber.App
 
-	db database.Service
+	DB database.Service
 }
 
 func New() *FiberServer {
@@ -19,7 +19,7 @@ func New() *FiberServer {
 			AppName:      "goAuth",
 		}),
 
-		db: database.New(),
+		DB: database.New(),
 	}
 
 	return server
