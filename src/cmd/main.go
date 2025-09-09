@@ -61,7 +61,11 @@ func main() {
 
 	go func() {
 		port, _ := strconv.Atoi(os.Getenv("PORT"))
-		err := server.Listen(fmt.Sprintf(":%d", port))
+		host := os.Getenv("HOST")
+		if host == "" {
+			host = "0.0.0.0"
+		}
+		err := server.Listen(fmt.Sprintf("%s:%d", host, port))
 		if err != nil {
 			panic(fmt.Sprintf("http server error: %s", err))
 		}
