@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"goAuth/internal/common"
 	"goAuth/internal/server/api/schema"
+	"goAuth/internal/utils/ratelimit"
 	"net/http"
 
 	"github.com/gofiber/fiber/v2"
@@ -30,6 +31,19 @@ func NewLoginHandler(service LoginService) *LoginHandler {
 	}
 }
 
+// RequestOTP godoc
+//
+//	@Summary		Request OTP
+//	@Description	Requests an OTP to be sent to the given phone number.
+//	@Tags			Auth
+//	@Accept			json
+//	@Produce		json
+//	@Param			OTPRequest	body		schema.OTPRequest		true	"Phone number for OTP"
+//	@Success		200			{object}	common.BasicResponse	"OTP sent successfully"
+//	@Failure		400			{object}	common.ErrorResponse	"Invalid request body"
+//	@Failure		429			{object}	common.ErrorResponse	"Too many OTP requests"
+//	@Failure		500			{object}	common.ErrorResponse	"Internal server error"
+//	@Router			/api/v1/auth/request [post]
 func (h *LoginHandler) RequestOTP(c *fiber.Ctx) error {
 	req := new(schema.OTPRequest)
 	common.Validate.RegisterValidation("regex", schema.PhoneNumberValidator)
@@ -38,8 +52,18 @@ func (h *LoginHandler) RequestOTP(c *fiber.Ctx) error {
 		h.logger.Debug("req body is not valid", zap.Any("req", req), zap.Error(errors.Join(errParse, errValidate)))
 		return c.Status(http.StatusBadRequest).JSON(common.BadParamsErrorResponse)
 	}
+
+	limited, retryAfter := ratelimit.RateLimit("otp:"+req.PhoneNumber, 3, 10*60)
+	if limited {
+		return c.Status(http.StatusTooManyRequests).JSON(common.ErrorResponse{
+			StatusCode: http.StatusTooManyRequests,
+			Status:     "error",
+			Message:    fmt.Sprintf("Too many OTP requests. Please try again after %d minutes.", (retryAfter+59)/60),
+		})
+	}
+
 	if err := h.service.OTPRequest(req.PhoneNumber); err != nil {
-		c.Status(http.StatusInternalServerError).JSON(common.ErrorResponse{
+		return c.Status(http.StatusInternalServerError).JSON(common.ErrorResponse{
 			StatusCode: http.StatusInternalServerError,
 			Status:     "error",
 			Message:    "OTP Creation faild",
@@ -51,6 +75,20 @@ func (h *LoginHandler) RequestOTP(c *fiber.Ctx) error {
 	})
 }
 
+// VerifyOTP godoc
+//
+//	@Summary		Verify OTP
+//	@Description	Verifies the OTP code for the given phone number and returns an access token.
+//	@Tags			Auth
+//	@Accept			json
+//	@Produce		json
+//	@Param			LoginRequest	body		schema.LoginRequest		true	"Phone number and OTP code"
+//	@Success		200				{object}	common.BasicResponse	"OTP verified successfully"
+//	@Failure		400				{object}	common.ErrorResponse	"Invalid request body"
+//	@Failure		401				{object}	common.ErrorResponse	"Incorrect OTP code or verification failed"
+//	@Failure		404				{object}	common.ErrorResponse	"OTP not found or expired"
+//	@Failure		500				{object}	common.ErrorResponse	"Internal server error"
+//	@Router			/api/v1/auth/verify [post]
 func (h *LoginHandler) VerifyOTP(c *fiber.Ctx) error {
 	common.Validate.RegisterValidation("regex", schema.PhoneNumberValidator)
 
@@ -119,6 +157,7 @@ func (h *LoginHandler) VerifyOTP(c *fiber.Ctx) error {
 		BasicResponse: common.BasicResponse{
 			StatusCode: http.StatusOK,
 			Message:    "OTP verified successfully",
+			Status:     "Ok",
 		},
 		Data: map[string]string{"access_token": accessToken},
 	})

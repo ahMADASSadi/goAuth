@@ -33,8 +33,8 @@ func NewUserHandler(service UserService) *UserHandler {
 //	@Tags			Users
 //	@Accept			json
 //	@Produce		json
-//	@Param			id	path		int	true	"User ID"
-//	@Success		200	{object}	schema.User "returns the user details including the id and phone number"
+//	@Param			id	path		int			true	"User ID"
+//	@Success		200	{object}	schema.User	"returns the user details including the id and phone number"
 //	@Failure		400	{object}	common.ErrorResponse
 //	@Failure		404	{object}	common.ErrorResponse
 //	@Router			/api/v1/users/{id} [get]
