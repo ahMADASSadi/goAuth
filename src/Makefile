@@ -3,6 +3,7 @@
 # Build the application
 all: build test
 
+# Create the OpenAPI Documentations
 doc:
 	@echo "Generating docs..."
 	@swag init -g internal/server/routes.go
