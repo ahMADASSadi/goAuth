@@ -32,3 +32,10 @@ main
 # OS X generated file
 .DS_Store
 
+# Swagger Documentation
+docs
+
+
+# Local Database
+*.sqlite3
+*.sql
