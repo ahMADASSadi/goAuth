@@ -3,6 +3,10 @@
 # Build the application
 all: build test
 
+doc:
+	@echo "Generating docs..."
+	@swag init -g internal/server/routes.go
+
 build:
 	@echo "Building..."
 	
@@ -24,7 +28,7 @@ clean:
 	@rm -f main
 
 # Live Reload
-watch:
+watch: doc
 	@if command -v air > /dev/null; then \
             air; \
             echo "Watching...";\
@@ -40,4 +44,4 @@ watch:
             fi; \
         fi
 
-.PHONY: all build run test clean watch
+.PHONY: all build run test clean watch doc
