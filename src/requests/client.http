@@ -1,10 +1,10 @@
-@host = http://0.0.0.0:8080/api/v1
+@host = http://0.0.0.0:8000/api/v1
 @phone_number = 09138038121
 @user_id=1
 
 
 ### First request: Send OTP
-POST {{host}}/send-otp
+POST {{host}}/auth/request
 Content-Type: application/json
 
 {
@@ -14,12 +14,12 @@ Content-Type: application/json
 ###
 
 ### Second request: Verify OTP
-POST {{host}}/verify-otp
+POST {{host}}/auth/verify
 Content-Type: application/json
 
 {
     "phone_number": "{{phone_number}}",
-    "otp": "481988"
+    "otp": "262092"
 }
 
 ###
