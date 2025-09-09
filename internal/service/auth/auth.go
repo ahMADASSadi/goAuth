@@ -91,16 +91,21 @@ func (s *service) RegisterUser(phoneNumber string) (created bool, err error) {
 }
 
 func (s *service) GenerateToken(phoneNumber string) (accessToken string, err error) {
-	expiryStr := os.Getenv("access_expiry")
+	expiryStr := os.Getenv("ACCESS_EXPIRY")
+	secretStr := os.Getenv("SECRET_KEY")
 	expiryDuration, err := time.ParseDuration(expiryStr)
+
 	if err != nil {
 		s.logger.Error("invalid accessExpiry duration", zap.String("accessExpiry", expiryStr), zap.Error(err))
 		return "", fmt.Errorf("invalid accessExpiry duration: %w", err)
 	}
+
 	iat := time.Now().Unix()
+
 	hasher := sha256.New()
 	hasher.Write([]byte(phoneNumber + fmt.Sprint(iat)))
 	userHash := fmt.Sprintf("%x", hasher.Sum(nil))
+
 	claims := jwt.MapClaims{
 		"user": userHash,
 		"exp":  time.Now().Add(expiryDuration).Unix(),
@@ -108,10 +113,11 @@ func (s *service) GenerateToken(phoneNumber string) (accessToken string, err err
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signedToken, err := token.SignedString([]byte(os.Getenv("secret_key")))
+	signedToken, err := token.SignedString([]byte(secretStr))
 	if err != nil {
 		s.logger.Error("failed to sign JWT token", zap.Error(err))
 		return "", err
 	}
+
 	return signedToken, nil
 }

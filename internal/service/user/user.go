@@ -33,26 +33,27 @@ func (s *service) GetUser(id uint8) *schema.User {
 	}
 }
 
-func (s *service) GetUsers(page, pageSize int, baseURL string) *schema.UserList {
-	// Validate and normalize pagination parameters
+func (s *service) GetUsers(page, pageSize int, baseURL string, phoneNumber *string) *schema.UserList {
 	page, pageSize = paginator.ValidatePagination(page, pageSize)
 
-	// Count total records
+	query := s.db.Model(&model.User{})
+	if phoneNumber != nil {
+		query = query.Where("phone_number LIKE ?", "%"+*phoneNumber+"%")
+	}
+
 	var total int64
-	if err := s.db.Model(&model.User{}).Count(&total).Error; err != nil {
+	if err := query.Count(&total).Error; err != nil {
 		s.logger.Error("failed to count users", zap.Error(err))
 		return nil
 	}
 
-	// Get paginated data
 	var users []model.User
 	offset := paginator.CalculateOffset(page, pageSize)
-	if err := s.db.Limit(pageSize).Offset(offset).Find(&users).Error; err != nil {
+	if err := query.Limit(pageSize).Offset(offset).Find(&users).Error; err != nil {
 		s.logger.Error("failed to list users", zap.Error(err))
 		return nil
 	}
 
-	// Convert to schema
 	var schemaUsers []schema.User
 	for _, u := range users {
 		schemaUsers = append(schemaUsers, schema.User{
@@ -61,9 +62,7 @@ func (s *service) GetUsers(page, pageSize int, baseURL string) *schema.UserList 
 		})
 	}
 
-	// Create pagination metadata
 	pagination := paginator.NewPagination(page, pageSize, total, baseURL)
 
-	// Return paginated response
 	return paginator.NewPaginatedResponse(schemaUsers, pagination)
 }
