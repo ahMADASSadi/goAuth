@@ -54,7 +54,7 @@ func main() {
 	authService := auth.NewAuthenticationService(dbInstance, inMemoService)
 	userService := user.NewUserService(dbInstance)
 
-	server.SetupRoutes(authService,userService)
+	server.SetupRoutes(authService, userService)
 
 	// Create a done channel to signal when the shutdown is complete
 	done := make(chan bool, 1)
