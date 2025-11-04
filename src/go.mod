@@ -11,7 +11,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.32
 	go.uber.org/zap v1.27.0
 	gorm.io/driver/sqlite v1.6.0
-	gorm.io/gorm v1.30.5
+	gorm.io/gorm v1.31.1
 )
 
 require (
