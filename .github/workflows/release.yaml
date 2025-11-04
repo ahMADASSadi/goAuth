@@ -7,7 +7,7 @@ on:
 
 env:
     GO_VERSION: "1.24"
-    DOCKERHUB_REPO: goauth-backend-repo
+    DOCKERHUB_REPO: madassandd/goauth-backend-repo
 
 jobs:
     merge-and-release:
