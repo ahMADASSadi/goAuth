@@ -1,0 +1,134 @@
+name: Release
+
+on:
+    push:
+        tags:
+            - "v*.*.*"
+    workflow_dispatch:
+        inputs:
+            version:
+                description: "Version to release (e.g., v1.0.0)"
+                required: true
+                type: string
+
+env:
+    GO_VERSION: "1.24"
+    REGISTRY: ghcr.io
+    IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+    create-release:
+        name: Create Release
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+            packages: write
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Set up Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version: ${{ env.GO_VERSION }}
+                  cache-dependency-path: src/go.sum
+
+            - name: Get version
+              id: version
+              run: |
+                  if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+                    echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+                  else
+                    echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+                  fi
+
+            - name: Build binaries
+              working-directory: src
+              run: |
+                  # Build for multiple platforms
+                  GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.VERSION }}" -o ../dist/goauth-linux-amd64 ./cmd/main.go
+                  GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.VERSION }}" -o ../dist/goauth-linux-arm64 ./cmd/main.go
+                  GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.VERSION }}" -o ../dist/goauth-darwin-amd64 ./cmd/main.go
+                  GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.VERSION }}" -o ../dist/goauth-darwin-arm64 ./cmd/main.go
+                  GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.VERSION }}" -o ../dist/goauth-windows-amd64.exe ./cmd/main.go
+
+            - name: Create checksums
+              run: |
+                  cd dist
+                  sha256sum * > checksums.txt
+
+            - name: Generate changelog
+              id: changelog
+              run: |
+                  # Generate changelog from git log
+                  PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+                  if [ -z "$PREVIOUS_TAG" ]; then
+                    CHANGELOG=$(git log --pretty=format:"- %s (%h)" --reverse)
+                  else
+                    CHANGELOG=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"- %s (%h)" --reverse)
+                  fi
+                  echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+                  echo "$CHANGELOG" >> $GITHUB_OUTPUT
+                  echo "EOF" >> $GITHUB_OUTPUT
+
+            - name: Create Release
+              uses: softprops/action-gh-release@v1
+              with:
+                  tag_name: ${{ steps.version.outputs.VERSION }}
+                  name: Release ${{ steps.version.outputs.VERSION }}
+                  body: |
+                      ## What's Changed
+
+                      ${{ steps.changelog.outputs.CHANGELOG }}
+
+                      ## Installation
+
+                      Download the appropriate binary for your platform from the assets below.
+
+                      ### Docker
+                      ```bash
+                      docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
+                      ```
+
+                      ## Checksums
+                      See `checksums.txt` for file verification.
+                  draft: false
+                  prerelease: ${{ contains(steps.version.outputs.VERSION, 'alpha') || contains(steps.version.outputs.VERSION, 'beta') || contains(steps.version.outputs.VERSION, 'rc') }}
+                  files: |
+                      dist/*
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Log in to Container Registry
+              uses: docker/login-action@v3
+              with:
+                  registry: ${{ env.REGISTRY }}
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Extract metadata for Docker
+              id: meta
+              uses: docker/metadata-action@v5
+              with:
+                  images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+                  tags: |
+                      type=semver,pattern={{version}},value=${{ steps.version.outputs.VERSION }}
+                      type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.VERSION }}
+                      type=semver,pattern={{major}},value=${{ steps.version.outputs.VERSION }}
+
+            - name: Build and push Docker image
+              uses: docker/build-push-action@v5
+              with:
+                  context: .
+                  file: ./Dockerfile
+                  push: true
+                  tags: ${{ steps.meta.outputs.tags }}
+                  labels: ${{ steps.meta.outputs.labels }}
+                  platforms: linux/amd64,linux/arm64
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max

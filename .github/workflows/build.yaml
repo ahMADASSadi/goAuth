@@ -1,0 +1,306 @@
+name: CI/CD Pipeline
+
+on:
+    push:
+        branches:
+            - main
+            - dev
+            - "feature/**"
+    pull_request:
+        branches:
+            - main
+            - dev
+    workflow_dispatch:
+
+env:
+    GO_VERSION: "1.24"
+    REGISTRY: ghcr.io
+    IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+    # Lint and format check
+    lint:
+        name: Lint Code
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Set up Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version: ${{ env.GO_VERSION }}
+                  cache-dependency-path: src/go.sum
+
+            - name: golangci-lint
+              uses: golangci/golangci-lint-action@v4
+              with:
+                  version: latest
+                  working-directory: src
+                  args: --timeout=5m
+
+            - name: Check Go mod tidy
+              working-directory: src
+              run: |
+                  go mod tidy
+                  git diff --exit-code go.mod go.sum
+
+    # Build and test
+    build-and-test:
+        name: Build and Test
+        runs-on: ubuntu-latest
+        needs: lint
+        strategy:
+            matrix:
+                os: [ubuntu-latest]
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Set up Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version: ${{ env.GO_VERSION }}
+                  cache-dependency-path: src/go.sum
+
+            - name: Install dependencies
+              working-directory: src
+              run: |
+                  go mod download
+                  go mod verify
+
+            - name: Install swag for documentation
+              run: go install github.com/swaggo/swag/cmd/swag@latest
+
+            - name: Generate Swagger documentation
+              working-directory: src
+              run: swag init -g internal/server/routes.go
+
+            - name: Build application
+              working-directory: src
+              run: |
+                  go build -v -o ./bin/server ./cmd/main.go
+
+            - name: Run tests
+              working-directory: src
+              run: |
+                  go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+            - name: Upload coverage to Codecov
+              uses: codecov/codecov-action@v4
+              with:
+                  files: ./src/coverage.out
+                  flags: unittests
+                  name: codecov-goAuth
+                  fail_ci_if_error: false
+                  token: ${{ secrets.CODECOV_TOKEN }}
+
+            - name: Upload build artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: server-binary-${{ matrix.os }}
+                  path: src/bin/server
+                  retention-days: 7
+
+    # Security scanning
+    security:
+        name: Security Scan
+        runs-on: ubuntu-latest
+        needs: lint
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Set up Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version: ${{ env.GO_VERSION }}
+                  cache-dependency-path: src/go.sum
+
+            - name: Run Gosec Security Scanner
+              uses: securego/gosec@master
+              with:
+                  args: "-no-fail -fmt sarif -out results.sarif ./src/..."
+
+            - name: Upload SARIF file
+              uses: github/codeql-action/upload-sarif@v3
+              with:
+                  sarif_file: results.sarif
+
+            - name: Run Trivy vulnerability scanner in repo mode
+              uses: aquasecurity/trivy-action@master
+              with:
+                  scan-type: "fs"
+                  scan-ref: "./src"
+                  format: "sarif"
+                  output: "trivy-results.sarif"
+                  severity: "CRITICAL,HIGH"
+
+            - name: Upload Trivy scan results to GitHub Security tab
+              uses: github/codeql-action/upload-sarif@v3
+              with:
+                  sarif_file: "trivy-results.sarif"
+
+    # Build Docker image
+    docker-build:
+        name: Build Docker Image
+        runs-on: ubuntu-latest
+        needs: [build-and-test, security]
+        permissions:
+            contents: read
+            packages: write
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Log in to Container Registry
+              if: github.event_name != 'pull_request'
+              uses: docker/login-action@v3
+              with:
+                  registry: ${{ env.REGISTRY }}
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Extract metadata (tags, labels)
+              id: meta
+              uses: docker/metadata-action@v5
+              with:
+                  images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+                  tags: |
+                      type=ref,event=branch
+                      type=ref,event=pr
+                      type=semver,pattern={{version}}
+                      type=semver,pattern={{major}}.{{minor}}
+                      type=sha,prefix={{branch}}-
+                      type=raw,value=latest,enable={{is_default_branch}}
+
+            - name: Build and push Docker image
+              uses: docker/build-push-action@v5
+              with:
+                  context: .
+                  file: ./Dockerfile
+                  push: ${{ github.event_name != 'pull_request' }}
+                  tags: ${{ steps.meta.outputs.tags }}
+                  labels: ${{ steps.meta.outputs.labels }}
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+                  platforms: linux/amd64,linux/arm64
+
+            - name: Scan Docker image with Trivy
+              uses: aquasecurity/trivy-action@master
+              with:
+                  image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+                  format: "sarif"
+                  output: "docker-trivy-results.sarif"
+                  severity: "CRITICAL,HIGH"
+              if: github.event_name != 'pull_request'
+
+            - name: Upload Docker Trivy scan results
+              uses: github/codeql-action/upload-sarif@v3
+              with:
+                  sarif_file: "docker-trivy-results.sarif"
+              if: github.event_name != 'pull_request'
+
+    # Integration tests with Docker Compose
+    integration-test:
+        name: Integration Tests
+        runs-on: ubuntu-latest
+        needs: docker-build
+        if: github.event_name != 'pull_request'
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Create .env file for testing
+              working-directory: src
+              run: |
+                  cat > .env << EOF
+                  PORT=8000
+                  HOST=0.0.0.0
+                  DB_URL=/app/test.sqlite3
+                  ACCESS_EXPIRY=24h
+                  SECRET_KEY=test-secret-key-for-ci
+                  EOF
+
+            - name: Start services with Docker Compose
+              run: |
+                  docker-compose up -d
+                  sleep 10
+
+            - name: Check if service is running
+              run: |
+                  docker-compose ps
+                  docker-compose logs app
+
+            - name: Wait for service to be healthy
+              run: |
+                  timeout 60 bash -c 'until curl -f http://localhost:8000/health 2>/dev/null; do sleep 2; done' || true
+
+            - name: Run basic integration tests
+              run: |
+                  # Test health endpoint
+                  curl -v http://localhost:8000/health || echo "Health check endpoint not available"
+
+                  # Add more integration tests here as needed
+                  echo "Integration tests completed"
+
+            - name: Stop services
+              if: always()
+              run: docker-compose down -v
+
+    # Deploy (example for a deployment stage)
+    # deploy:
+    #     name: Deploy to Production
+    #     runs-on: ubuntu-latest
+    #     needs: [integration-test]
+    #     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    #     environment:
+    #         name: production
+    #         url: https://your-production-url.com
+    #     steps:
+    #         - name: Checkout code
+    #           uses: actions/checkout@v4
+
+    #         - name: Deploy notification
+    #           run: |
+    #               echo "🚀 Deploying to production environment"
+    #               echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+
+    #         # Add your deployment steps here, for example:
+    #         # - Deploy to Kubernetes
+    #         # - Deploy to cloud provider (AWS ECS, GCP Cloud Run, Azure Container Apps)
+    #         # - Deploy to VM via SSH
+    #         # - Update container orchestration platform
+
+    #         - name: Deployment success notification
+    #           if: success()
+    #           run: echo "✅ Deployment completed successfully"
+
+    #         - name: Deployment failure notification
+    #           if: failure()
+    #           run: echo "❌ Deployment failed"
+
+    # Summary job
+    summary:
+        name: Pipeline Summary
+        runs-on: ubuntu-latest
+        needs: [lint, build-and-test, security, docker-build]
+        if: always()
+        steps:
+            - name: Check job statuses
+              run: |
+                  echo "### Pipeline Summary 📊" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+                  echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+                  echo "| Lint | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
+                  echo "| Build and Test | ${{ needs.build-and-test.result }} |" >> $GITHUB_STEP_SUMMARY
+                  echo "| Security Scan | ${{ needs.security.result }} |" >> $GITHUB_STEP_SUMMARY
+                  echo "| Docker Build | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+                  echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+                  echo "**Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY

@@ -1,23 +1,45 @@
-
 services:
   app:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: goauth-app
     ports:
       - "8000:8000"
     env_file:
       - src/.env
+    environment:
+      - DB_URL=/app/data/test.sqlite3
+      - PORT=8000
+      - HOST=0.0.0.0
     volumes:
       - ./src/.env:/app/.env:ro
+      - db_data:/app/data
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:8000/health",
+        ]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
     depends_on: []
+    networks:
+      - goauth-network
     # depends_on:
     #   - db
 
   # Example PostgreSQL service
   # db:
   #   image: postgres:15-alpine
+  #   container_name: goauth-db
   #   environment:
   #     POSTGRES_USER: user
   #     POSTGRES_PASSWORD: password
@@ -26,7 +48,18 @@ services:
   #     - "5432:5432"
   #   volumes:
   #     - db_data:/var/lib/postgresql/data
+  #   networks:
+  #     - goauth-network
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U user"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
 
-# volumes:
-#   db_data:
+volumes:
+  db_data:
+    driver: local
 
+networks:
+  goauth-network:
+    driver: bridge

@@ -34,12 +34,19 @@ COPY --from=builder /app/.env .
 
 EXPOSE 8000
 
-VOLUME ["/app/"]
+VOLUME ["/app/data"]
 
-ENV DB_URL=/app/test.sqlite3
-ENV PORT = 8000
-ENV HOST = 0.0.0.0
+# Environment variables (can be overridden at runtime)
+ENV DB_URL=/app/data/test.sqlite3
+ENV PORT=8000
+ENV HOST=0.0.0.0
 
+# Create data directory for SQLite database
+RUN mkdir -p /app/data
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8000/health || exit 1
 
 CMD ["./server"]
 

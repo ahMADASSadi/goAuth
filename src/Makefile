@@ -45,4 +45,64 @@ watch: doc
             fi; \
         fi
 
-.PHONY: all build run test clean watch doc
+# Docker commands
+docker-build:
+	@echo "Building Docker image..."
+	@cd .. && docker build -t goauth:latest .
+
+docker-run:
+	@echo "Running Docker container..."
+	@cd .. && docker-compose up -d
+
+docker-stop:
+	@echo "Stopping Docker containers..."
+	@cd .. && docker-compose down
+
+docker-logs:
+	@echo "Showing Docker logs..."
+	@cd .. && docker-compose logs -f app
+
+docker-rebuild:
+	@echo "Rebuilding and restarting Docker containers..."
+	@cd .. && docker-compose down && docker-compose up -d --build
+
+# Linting
+lint:
+	@echo "Running linters..."
+	@golangci-lint run
+
+# Code coverage
+coverage:
+	@echo "Running tests with coverage..."
+	@go test -race -coverprofile=coverage.out -covermode=atomic ./...
+	@go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report generated: coverage.html"
+
+# Install development tools
+install-tools:
+	@echo "Installing development tools..."
+	@go install github.com/swaggo/swag/cmd/swag@latest
+	@go install github.com/air-verse/air@latest
+	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	@echo "Tools installed successfully"
+
+# Help command
+help:
+	@echo "Available commands:"
+	@echo "  make all           - Build and test the application"
+	@echo "  make build         - Build the application binary"
+	@echo "  make run           - Run the application"
+	@echo "  make test          - Run tests"
+	@echo "  make coverage      - Run tests with coverage report"
+	@echo "  make clean         - Remove build artifacts"
+	@echo "  make doc           - Generate Swagger documentation"
+	@echo "  make watch         - Run with live reload"
+	@echo "  make lint          - Run linters"
+	@echo "  make docker-build  - Build Docker image"
+	@echo "  make docker-run    - Run with Docker Compose"
+	@echo "  make docker-stop   - Stop Docker containers"
+	@echo "  make docker-logs   - Show Docker logs"
+	@echo "  make docker-rebuild- Rebuild and restart containers"
+	@echo "  make install-tools - Install development tools"
+
+.PHONY: all build run test clean watch doc docker-build docker-run docker-stop docker-logs docker-rebuild lint coverage install-tools help

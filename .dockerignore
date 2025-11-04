@@ -1,0 +1,53 @@
+# Git
+.git
+.gitignore
+.github
+
+# Documentation
+*.md
+documentation.md
+README.md
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Test files
+*_test.go
+testdata
+coverage.out
+
+# Binary files
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+main
+server
+bin/
+
+# Database files (will be created in container)
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment files (will be copied separately)
+.env
+.env.*
+!.env.example
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Misc
+tmp/
+temp/
+logs/
+*.log
+requests/

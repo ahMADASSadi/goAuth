@@ -1,0 +1,51 @@
+version: "1"
+
+# Removed `linters-settings` section because some YAML schemas and editors
+# report "Property linters-settings is not allowed". Default linter settings
+# will be used; if you need custom settings, reintroduce per-linter configs
+# in a schema-compliant way or update the editor's YAML schema.
+linters:
+  # disable-all: true
+  enable:
+    - bodyclose
+    - dogsled
+    - dupl
+    - errcheck
+    - exportloopref
+    - funlen
+    - gochecknoinits
+    - goconst
+    - gocritic
+    - gocyclo
+    - gofmt
+    - goimports
+    - gomnd
+    - goprintffuncname
+    - gosec
+    - gosimple
+    - govet
+    - ineffassign
+    - lll
+    - misspell
+    - nakedret
+    - nolintlint
+    - staticcheck
+    - stylecheck
+    - typecheck
+    - unconvert
+    - unparam
+    - unused
+    - whitespace
+
+# issues:
+#   exclude-rules:
+#     - path: _test\.go
+#       linters:
+#         - gomnd
+#         - funlen
+#         - goconst
+#         - gocyclo
+
+run:
+  timeout: 5m
+  tests: false
