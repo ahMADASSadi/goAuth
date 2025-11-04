@@ -6,8 +6,8 @@ services:
     container_name: goauth-app
     ports:
       - "8000:8000"
-    env_file:
-      - src/.env
+    # env_file:
+    #   - src/.env
     environment:
       - DB_URL=/app/data/test.sqlite3
       - PORT=8000

@@ -1,4 +1,4 @@
-version: "1"
+version: "2"
 
 # Removed `linters-settings` section because some YAML schemas and editors
 # report "Property linters-settings is not allowed". Default linter settings

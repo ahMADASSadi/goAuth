@@ -4,21 +4,14 @@ on:
     push:
         tags:
             - "v*.*.*"
-    workflow_dispatch:
-        inputs:
-            version:
-                description: "Version to release (e.g., v1.0.0)"
-                required: true
-                type: string
 
 env:
     GO_VERSION: "1.24"
-    REGISTRY: ghcr.io
-    IMAGE_NAME: ${{ github.repository }}
+    DOCKERHUB_REPO: goauth-backend-repo
 
 jobs:
-    create-release:
-        name: Create Release
+    merge-and-release:
+        name: Merge Dev to Main and Create Release
         runs-on: ubuntu-latest
         permissions:
             contents: write
@@ -28,6 +21,24 @@ jobs:
               uses: actions/checkout@v4
               with:
                   fetch-depth: 0
+                  ref: dev
+
+            - name: Configure Git
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            - name: Merge dev into main
+              run: |
+                  git fetch origin main
+                  git checkout main
+                  git merge origin/dev --no-ff -m "chore: merge dev into main for release ${GITHUB_REF#refs/tags/}"
+                  git push origin main
+
+            - name: Get version
+              id: version
+              run: |
+                  echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
             - name: Set up Go
               uses: actions/setup-go@v5
@@ -35,19 +46,11 @@ jobs:
                   go-version: ${{ env.GO_VERSION }}
                   cache-dependency-path: src/go.sum
 
-            - name: Get version
-              id: version
-              run: |
-                  if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-                    echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-                  else
-                    echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-                  fi
-
             - name: Build binaries
               working-directory: src
               run: |
                   # Build for multiple platforms
+                  mkdir -p ../dist
                   GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.VERSION }}" -o ../dist/goauth-linux-amd64 ./cmd/main.go
                   GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.VERSION }}" -o ../dist/goauth-linux-arm64 ./cmd/main.go
                   GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.VERSION }}" -o ../dist/goauth-darwin-amd64 ./cmd/main.go
@@ -73,7 +76,7 @@ jobs:
                   echo "$CHANGELOG" >> $GITHUB_OUTPUT
                   echo "EOF" >> $GITHUB_OUTPUT
 
-            - name: Create Release
+            - name: Create GitHub Release
               uses: softprops/action-gh-release@v1
               with:
                   tag_name: ${{ steps.version.outputs.VERSION }}
@@ -89,7 +92,8 @@ jobs:
 
                       ### Docker
                       ```bash
-                      docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
+                      docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_REPO }}:${{ steps.version.outputs.VERSION }}
+                      docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_REPO }}:latest
                       ```
 
                       ## Checksums
@@ -104,24 +108,24 @@ jobs:
             - name: Set up Docker Buildx
               uses: docker/setup-buildx-action@v3
 
-            - name: Log in to Container Registry
+            - name: Log in to Docker Hub
               uses: docker/login-action@v3
               with:
-                  registry: ${{ env.REGISTRY }}
-                  username: ${{ github.actor }}
-                  password: ${{ secrets.GITHUB_TOKEN }}
+                  username: ${{ secrets.DOCKERHUB_USERNAME }}
+                  password: ${{ secrets.DOCKERHUB_TOKEN }}
 
             - name: Extract metadata for Docker
               id: meta
               uses: docker/metadata-action@v5
               with:
-                  images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+                  images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_REPO }}
                   tags: |
                       type=semver,pattern={{version}},value=${{ steps.version.outputs.VERSION }}
                       type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.VERSION }}
                       type=semver,pattern={{major}},value=${{ steps.version.outputs.VERSION }}
+                      type=raw,value=latest
 
-            - name: Build and push Docker image
+            - name: Build and push Docker image to Docker Hub
               uses: docker/build-push-action@v5
               with:
                   context: .
@@ -132,3 +136,12 @@ jobs:
                   platforms: linux/amd64,linux/arm64
                   cache-from: type=gha
                   cache-to: type=gha,mode=max
+
+            - name: Release Summary
+              run: |
+                  echo "### ✅ Release ${{ steps.version.outputs.VERSION }} Complete" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "- **Tag**: ${{ steps.version.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY
+                  echo "- **Merged**: dev → main" >> $GITHUB_STEP_SUMMARY
+                  echo "- **Docker Image**: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_REPO }}:${{ steps.version.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY
+                  echo "- **Platforms**: linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY

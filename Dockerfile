@@ -26,11 +26,9 @@ FROM alpine:latest
 WORKDIR /app
 
 
-RUN apk add --no-cache sqlite
+RUN apk add --no-cache sqlite wget
 
 COPY --from=builder /app/server .
-
-COPY --from=builder /app/.env .
 
 EXPOSE 8000
 
