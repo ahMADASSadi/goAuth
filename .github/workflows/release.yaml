@@ -28,23 +28,34 @@ jobs:
                   git config user.name "github-actions[bot]"
                   git config user.email "github-actions[bot]@users.noreply.github.com"
 
-            - name: Merge dev into main
+            - name: Set up Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version: ${{ env.GO_VERSION }}
+                  cache-dependency-path: src/go.sum
+
+            - name: Install swag for documentation
+              run: go install github.com/swaggo/swag/cmd/swag@latest
+
+            - name: Generate Swagger documentation
+              working-directory: src
               run: |
-                  git fetch origin main
-                  git checkout main
-                  git merge origin/dev --no-ff -m "chore: merge dev into main for release ${GITHUB_REF#refs/tags/}"
-                  git push origin main
+                  echo "Generating Swagger docs..."
+                  swag init -g internal/server/routes.go
+                  git add docs/
+                  git commit -m "docs: generate Swagger documentation for release ${GITHUB_REF#refs/tags/}" || echo "No docs changes to commit"
 
             - name: Get version
               id: version
               run: |
                   echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-            - name: Set up Go
-              uses: actions/setup-go@v5
-              with:
-                  go-version: ${{ env.GO_VERSION }}
-                  cache-dependency-path: src/go.sum
+            - name: Merge dev into main
+              run: |
+                  git fetch origin main
+                  git checkout main
+                  git merge origin/dev --no-ff -m "chore: merge dev into main for release ${GITHUB_REF#refs/tags/}"
+                  git push origin main
 
             - name: Build binaries
               working-directory: src
