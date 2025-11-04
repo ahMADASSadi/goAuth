@@ -10,7 +10,7 @@ RUN apk add --no-cache build-base sqlite-dev git
 COPY src/go.mod src/go.sum ./
 
 RUN go mod download
-
+RUN make doc
 COPY src/ .
 
 ENV CGO_ENABLED=1
